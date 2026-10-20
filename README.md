@@ -2,7 +2,7 @@
 
 A local Hyper-V lab where I build and automate an on-premises Active Directory, which I will later connect to Microsoft Entra ID. The lab focuses on the user lifecycle (onboarding and offboarding), least-privilege delegation and repeatable PowerShell automation.
 
-> **Status:** Phase 1 (on-prem AD + automation) is complete. Next: a domain-joined Windows 11 client, Group Policy and Entra ID sync. See [Roadmap](#roadmap).
+> **Status:** Phase 1 (on-prem AD + automation) is complete, and a Windows 11 client is joined to the domain. Next: Group Policy (account lockout), Windows LAPS and Entra ID sync. See [Roadmap](#roadmap).
 
 ## What this lab demonstrates
 
@@ -10,6 +10,7 @@ A local Hyper-V lab where I build and automate an on-premises Active Directory, 
 - Joiner/leaver automation in PowerShell: CSV → AD users, and offboarding by EmployeeId
 - Idempotent scripts with `-WhatIf` support, so they are safe to run again
 - Least-privilege Help Desk delegation (password reset and unlock only)
+- Joining a Windows 11 client (Secure Boot + vTPM) to the domain, directly into the right OU
 - User reporting to CSV for audits
 - Keeping secrets out of Git
 
@@ -20,12 +21,13 @@ flowchart LR
   subgraph Host["Windows 11 Pro host (Hyper-V)"]
     NAT["LabNAT switch + NAT<br/>10.10.10.0/24<br/>gateway 10.10.10.1"]
     DC01["DC01<br/>Windows Server 2025<br/>AD DS + DNS (lab.test)<br/>10.10.10.10"]
-    CL01["CL01 (planned)<br/>Windows 11 Education"]
+    CL01["CL01<br/>Windows 11 Education<br/>domain-joined<br/>10.10.10.20"]
   end
   Entra["Microsoft Entra ID (planned)"]
   Internet["Internet"]
   NAT --- DC01
-  NAT -.- CL01
+  NAT --- CL01
+  CL01 -->|DNS + domain logon| DC01
   NAT --> Internet
   DC01 -.->|sync, planned| Entra
 ```
@@ -35,8 +37,9 @@ flowchart LR
 | Component | Details |
 |---|---|
 | Host | Windows 11 Pro, 16 GB RAM, Hyper-V |
-| Network | Internal switch `LabNAT` + NAT, `10.10.10.0/24` |
+| Network | Internal switch `LabNAT` + NAT, `10.10.10.0/24`, static IPs (no DHCP) |
 | DC01 | Windows Server 2025 Standard (Desktop Experience), Gen 2, 2 vCPU, 1–4 GB dynamic RAM, `10.10.10.10` |
+| CL01 | Windows 11 Education 25H2, Gen 2 with Secure Boot + vTPM, 2 vCPU, 2–4 GB dynamic RAM, `10.10.10.20`, DNS `10.10.10.10`, in `OU=Workstations` |
 | Domain | `lab.test` (NetBIOS `LAB`), functional level Windows Server 2025 |
 | DNS | The DC points to itself (`127.0.0.1`); forwarder `1.1.1.1` |
 
@@ -102,6 +105,14 @@ Invoke-Command -VMName DC01 -Credential $cred -ScriptBlock {
 }
 ```
 
+Joining the client (run on CL01 as the local admin). One command sets the name, joins the domain and places the computer object in the right OU:
+
+```powershell
+Add-Computer -DomainName lab.test -NewName CL01 `
+    -OUPath 'OU=Workstations,OU=Computers,OU=LAB,DC=lab,DC=test' `
+    -Credential LAB\Administrator -Restart
+```
+
 The report script returns objects, so the CSV is written on the host. `-Encoding UTF8` keeps ä/ö readable in Excel:
 
 ```powershell
@@ -127,6 +138,8 @@ $report | Select-Object * -ExcludeProperty PSComputerName, RunspaceId, PSShowCom
 - **Onboarding:** 7 users created. The second Mikko Virtanen became `mikko.virtanen2`.
 - **Offboarding:** every result branch was tested, including the CN collision when both Mikko Virtanens were moved to `OU=Disabled`.
 - **Delegation:** tested as a Help Desk test account using `-Credential`. Unlock and reset worked under `OU=Users`. Reset in `OU=Disabled` and editing the description were denied. The test account was removed afterwards.
+- **Client join:** CL01 joined with `Add-Computer -OUPath`, so it landed directly in `OU=Workstations` instead of the default `CN=Computers` container, which is not an OU and cannot have GPOs linked.
+- **Domain logon:** `LAB\aino.makinen` signed in on CL01 after the forced first-logon password change. `PasswordLastSet` and `LastLogonDate` were populated in AD.
 - **DC health:** DNS resolution, SYSVOL/NETLOGON shares and DFSR event 4602. The network profile was fixed from `Public` to `DomainAuthenticated` by delaying the start of the NLA service.
 
 ## Lessons learned
@@ -134,14 +147,19 @@ $report | Select-Object * -ExcludeProperty PSComputerName, RunspaceId, PSShowCom
 - A DC must use itself for DNS. With `1.1.1.1` it cannot find its own SRV records, and logons, domain joins and GPOs stop working.
 - A password reset also clears "change password at next logon", so the Help Desk process sets it again.
 - An unused account that still has its initial password is a takeover risk. Better options are automatic disabling after X days, or a Temporary Access Pass.
+- A client must also use the DC for DNS. With a public resolver it cannot find `lab.test`, and the join fails with "domain controller could not be contacted".
+- Hyper-V Enhanced Session is RDP with Network Level Authentication, so a "change password at next logon" password cannot be changed there. Basic Session works. Remote workers on RDP hit the same problem, which SSPR with password writeback solves.
+- "The password does not meet the length, complexity, or history requirement" covers three causes. An admin reset skips the history check, but a user's own change does not, so the same password can pass one and fail the other.
+- The default domain policy has no account lockout (`LockoutThreshold 0`). My Sentinel honeypot showed why that matters, so lockout is the first GPO.
 - In a hybrid setup, disabling an account in AD reaches Entra only after the next sync, so offboarding should also revoke the user's Entra sessions.
 
 ## Roadmap
 
 - [x] AD DS + DNS on Windows Server 2025
 - [x] OU structure, groups, onboarding, offboarding, reporting, Help Desk delegation
-- [ ] Windows 11 client `CL01` joined to the domain
-- [ ] Group Policy (password and lockout policy)
+- [x] Windows 11 client `CL01` joined to the domain, domain logon tested
+- [ ] Group Policy (account lockout first, then workstation settings)
+- [ ] Windows LAPS for the local admin account on CL01
 - [ ] Entra ID: routable UPN suffix, then sync (Cloud Sync vs Connect Sync) scoped to `OU=Users` and `OU=Groups`
 - [ ] MFA, Conditional Access and a Temporary Access Pass for new users
 - [ ] Entra sign-in logs to Microsoft Sentinel with a detection rule (links to my [Sentinel honeypot](https://github.com/Tuomas404/azure-sentinel-honeypot))
