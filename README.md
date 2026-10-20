@@ -190,8 +190,8 @@ $report | Select-Object * -ExcludeProperty PSComputerName, RunspaceId, PSShowCom
 - [x] OU structure, groups, onboarding, offboarding, reporting, Help Desk delegation
 - [x] Windows 11 client `CL01` joined to the domain, domain logon tested
 - [x] Account lockout in the Default Domain Policy, tested from CL01
-- [ ] Group Policy for workstations (`OU=Workstations`)
 - [x] Windows LAPS with automatic account management, `cl01admin` disabled
+- [ ] More workstation GPOs in `OU=Workstations`
 - [ ] Entra ID: routable UPN suffix, then sync (Cloud Sync vs Connect Sync) scoped to `OU=Users` and `OU=Groups`
 - [ ] MFA, Conditional Access and a Temporary Access Pass for new users
 - [ ] Entra sign-in logs to Microsoft Sentinel with a detection rule (links to my [Sentinel honeypot](https://github.com/Tuomas404/azure-sentinel-honeypot))
