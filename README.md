@@ -69,7 +69,7 @@ The top level is split by object type, so Group Policy, delegation and the Entra
 | `scripts/New-LabGroups.ps1` | Creates the department groups `SG-Dept-HR/IT/Sales` and the role group `SG-Role-HelpDesk` (global security groups) |
 | `scripts/New-LabUsers.ps1` | Onboarding from `data/new-users.csv`. Matches users by EmployeeId, converts ä/ö to ASCII, keeps usernames within 20 characters with a number suffix if taken, sets a random 16-character initial password with change at first logon, and adds the user to the department OU and group |
 | `scripts/Disable-LabUser.ps1` | Offboarding by EmployeeId: disables the account, stamps the description, removes groups and moves the account to `OU=Disabled`. Supports `-WhatIf` |
-|    | `scripts/Get-LabUserReport.ps1` | User report (status, OU, groups, last logon, password last set), returned as objects. I export it on the host to a CSV outside the repo, with `;` as the delimiter for Finnish Excel |
+| `scripts/Get-LabUserReport.ps1` | User report (status, OU, groups, last logon, password last set), returned as objects. I export it on the host to a CSV outside the repo, with `;` as the delimiter for Finnish Excel |
 | `scripts/Grant-LabHelpDeskRights.ps1` | Delegates Help Desk rights to `SG-Role-HelpDesk`. Supports `-WhatIf` |
 
 `data/new-users.csv` contains 7 fictional users. It includes Finnish characters and two people named Mikko Virtanen on purpose, to test name collisions.
@@ -102,13 +102,13 @@ Invoke-Command -VMName DC01 -Credential $cred -ScriptBlock {
 }
 ```
 
-   The report script returns objects, so the CSV is written on the host. `-Encoding UTF8` keeps ä/ö readable in Excel:
+The report script returns objects, so the CSV is written on the host. `-Encoding UTF8` keeps ä/ö readable in Excel:
 
 ```powershell
-   $out = 'C:\path\to\lab-reports'
-   $report = Invoke-Command -VMName DC01 -Credential $cred -FilePath "$repo\scripts\Get-LabUserReport.ps1"
-   $report | Select-Object * -ExcludeProperty PSComputerName, RunspaceId, PSShowComputerName |
-       Export-Csv "$out\users-$(Get-Date -Format 'yyyy-MM-dd').csv" -Delimiter ';' -Encoding UTF8 -NoTypeInformation
+$out = 'C:\path\to\lab-reports'
+$report = Invoke-Command -VMName DC01 -Credential $cred -FilePath "$repo\scripts\Get-LabUserReport.ps1"
+$report | Select-Object * -ExcludeProperty PSComputerName, RunspaceId, PSShowComputerName |
+    Export-Csv "$out\users-$(Get-Date -Format 'yyyy-MM-dd').csv" -Delimiter ';' -Encoding UTF8 -NoTypeInformation
 ```
 
 ## Design decisions
